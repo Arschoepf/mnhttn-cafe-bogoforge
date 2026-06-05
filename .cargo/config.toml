@@ -5,4 +5,4 @@ rustflags = [
 
 [env]
 CUDA_ARCH = "sm_89"
-HIP_ARCH = "gfx1201'
+HIP_ARCH = "gfx1201"
