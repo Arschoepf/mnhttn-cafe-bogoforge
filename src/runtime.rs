@@ -53,7 +53,6 @@ impl ForgeRuntime {
         let result = self.runtime.block_on(async {
             let (lease_tx, lease_rx) = mpsc::channel::<Lease>(4);
             let (report_tx, report_rx) = mpsc::channel::<Report>(16);
-            // All backends write tagged results into one shared done channel.
             let (done_tx, done_rx) = mpsc::channel::<(usize, RangeResult)>(16);
 
             let mut backends: Vec<BackendHandle> = Vec::new();
@@ -82,9 +81,6 @@ impl ForgeRuntime {
                 let chunk_size = self.config.compute.gpu_chunk_size;
                 let metrics_gpu = Arc::clone(&metrics);
 
-                // Use a oneshot to surface init errors into the TUI before
-                // proceeding. The worker stays on the same OS thread as new()
-                // so the CUDA context remains valid.
                 let (init_tx, init_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
                 tokio::task::spawn_blocking(move || match GpuBackend::new(blocks, tpb) {
@@ -104,8 +100,6 @@ impl ForgeRuntime {
                         backends.push(BackendHandle::new(chunk_size, work_tx));
                     }
                     Ok(Ok(Err(e))) => {
-                        // Error already written to TUI status. Drop work_tx so
-                        // the scheduler never tries to dispatch to this backend.
                         eprintln!("[gpu] {e}");
                     }
                     _ => {
@@ -151,7 +145,6 @@ impl ForgeRuntime {
                 }
             }
 
-            // Drop the original sender so done_rx closes when all workers exit.
             drop(done_tx);
 
             let net = NetClient::new(

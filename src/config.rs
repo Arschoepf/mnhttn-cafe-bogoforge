@@ -14,8 +14,6 @@ pub struct Config {
 pub struct IdentityConfig {
     pub uuid: String,
     pub nickname: String,
-    /// Empty string on first run. The server issues a code in `welcome`;
-    /// call `Config::persist_code` to write it back here.
     pub code: String,
 }
 
@@ -27,7 +25,7 @@ pub struct ServerConfig {
 #[derive(Debug, Deserialize)]
 pub struct ComputeConfig {
     pub use_cpu: bool,
-    /// 0 = use all logical cores.
+    /// 0 = use all logical cores
     #[serde(default)]
     pub cpu_threads: usize,
     pub cpu_chunk_size: u64,
