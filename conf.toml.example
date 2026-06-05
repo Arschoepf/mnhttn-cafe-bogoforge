@@ -1,0 +1,22 @@
+[identity]
+uuid = ""
+nickname = ""
+code = ""
+
+[server]
+url = "wss://bogo.swapjs.dev/ws"
+
+[compute]
+# cpu section
+use_cpu = false
+cpu_chunk_size = 50000000
+cpu_threads = 0
+
+# gpu section
+use_gpu = true
+gpu_chunk_size = 536870912
+cuda_blocks = 1024
+cuda_threads_per_block = 256
+
+[reporting]
+report_interval = 1000

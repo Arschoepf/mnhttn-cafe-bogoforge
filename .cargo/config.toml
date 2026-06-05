@@ -1,0 +1,8 @@
+[build]
+rustflags = [
+    "-C", "target-cpu=native"
+]
+
+[env]
+CUDA_ARCH = "sm_89"
+HIP_ARCH = "gfx1201'

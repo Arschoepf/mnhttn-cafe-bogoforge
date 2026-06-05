@@ -1,0 +1,53 @@
+[package]
+name = "bogoforge"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+cuda = ["dep:cust"]
+hip  = []
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+
+[dependencies]
+# Async runtime + WebSocket
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures-util = "0.3"
+http = "1"
+
+# Serialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# TOML Config
+toml = "1.1.2+spec-1.1.0"
+
+# Error handling
+anyhow = "1"
+
+# CPU compute
+orx-parallel = "3"
+
+# TUI
+ratatui = "0.28"
+crossterm = "0.27"
+sysinfo = "0.31"
+
+# Sync primitives
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+# CUDA bindings (optional; disable with --no-default-features)
+cust = { version = "0.3", optional = true }
+
+[build-dependencies]
+# build.rs uses std::process::Command to invoke nvcc --ptx
