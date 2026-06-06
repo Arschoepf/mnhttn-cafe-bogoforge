@@ -19,10 +19,11 @@ use sysinfo::{CpuRefreshKind, RefreshKind, System};
 use tokio_util::sync::CancellationToken;
 
 use crate::metrics::SharedMetrics;
+use log::error;
 
 pub fn run(metrics: SharedMetrics, cancel: CancellationToken) {
     if let Err(e) = run_inner(&metrics, &cancel) {
-        eprintln!("[tui] error: {e}");
+        error!("[tui] error: {e}");
     }
     cancel.cancel();
 }

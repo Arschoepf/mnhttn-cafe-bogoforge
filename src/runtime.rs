@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
+use log::{debug, error};
 use tokio::runtime::{self, Runtime};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -10,8 +11,10 @@ use tokio_util::sync::CancellationToken;
 use crate::compute::gpu::GpuBackend;
 #[cfg(feature = "hip")]
 use crate::compute::amd::AmdBackend;
+#[cfg(feature = "vk")]
+use crate::compute::vk::VkBackend;
 use crate::compute::{cpu::CpuBackend, run_compute_worker};
-use crate::config::Config;
+use crate::config::{Config, GpuBackendKind};
 use crate::metrics::Metrics;
 use crate::net::{
     types::{Chunk, Lease, RangeResult, Report},
@@ -37,18 +40,44 @@ impl ForgeRuntime {
     }
 
     pub fn startup(&self) -> anyhow::Result<()> {
-        if !self.config.compute.use_cpu && !self.config.compute.use_gpu && !self.config.compute.use_amd {
-            bail!("no compute backend enabled; set use_cpu, use_gpu, or use_amd to true in config.toml");
+        if !self.config.compute.use_cpu && !self.config.compute.use_gpu {
+            bail!("no compute backend enabled; set use_cpu or use_gpu to true in config.toml");
         }
 
         let metrics = Metrics::new();
         let cancel = CancellationToken::new();
+        let report_interval = self.config.reporting.report_interval;
 
-        let tui_metrics = Arc::clone(&metrics);
-        let tui_cancel = cancel.clone();
-        let tui_handle = std::thread::spawn(move || {
-            tui::run(tui_metrics, tui_cancel);
-        });
+        let maybe_tui_handle = if self.config.ui.disable_tui {
+            let log_metrics = Arc::clone(&metrics);
+            let log_cancel = cancel.clone();
+            Some(std::thread::spawn(move || {
+                loop {
+                    if log_cancel.is_cancelled() {
+                        break;
+                    }
+
+                    debug!(
+                        "metrics: rate={:.2} session={} lifetime={} last_best={} session_best={} all_best={} status={}",
+                        log_metrics.compute_rate(),
+                        log_metrics.session_shuffles.load(std::sync::atomic::Ordering::Relaxed),
+                        log_metrics.lifetime_shuffles.load(std::sync::atomic::Ordering::Relaxed),
+                        log_metrics.last_report_best.load(std::sync::atomic::Ordering::Relaxed),
+                        log_metrics.session_best.load(std::sync::atomic::Ordering::Relaxed),
+                        log_metrics.all_time_best.load(std::sync::atomic::Ordering::Relaxed),
+                        log_metrics.status.lock().clone(),
+                    );
+
+                    std::thread::sleep(Duration::from_millis(report_interval));
+                }
+            }))
+        } else {
+            let tui_metrics = Arc::clone(&metrics);
+            let tui_cancel = cancel.clone();
+            Some(std::thread::spawn(move || {
+                tui::run(tui_metrics, tui_cancel);
+            }))
+        };
 
         let result = self.runtime.block_on(async {
             let (lease_tx, lease_rx) = mpsc::channel::<Lease>(4);
@@ -71,77 +100,53 @@ impl ForgeRuntime {
                 ));
             }
 
-            #[cfg(feature = "cuda")]
             if self.config.compute.use_gpu {
+                let gpu = self.config.resolve_gpu().expect("invalid gpu_profile");
                 let id = backends.len();
                 let (work_tx, work_rx) = mpsc::channel::<Chunk>(2);
                 let gpu_done_tx = done_tx.clone();
-                let blocks = self.config.compute.cuda_blocks;
-                let tpb = self.config.compute.cuda_threads_per_block;
-                let chunk_size = self.config.compute.gpu_chunk_size;
                 let metrics_gpu = Arc::clone(&metrics);
-
+                let chunk_size = gpu.chunk_size;
                 let (init_tx, init_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
-                tokio::task::spawn_blocking(move || match GpuBackend::new(blocks, tpb) {
-                    Ok(backend) => {
-                        let _ = init_tx.send(Ok(()));
-                        run_compute_worker(id, backend, work_rx, gpu_done_tx);
+                match gpu.kind {
+                    #[cfg(feature = "cuda")]
+                    GpuBackendKind::Cuda => {
+                        let (blocks, tpb) = (gpu.blocks, gpu.threads_per_block);
+                        tokio::task::spawn_blocking(move || match GpuBackend::new(blocks, tpb) {
+                            Ok(b) => { let _ = init_tx.send(Ok(())); run_compute_worker(id, b, work_rx, gpu_done_tx); }
+                            Err(e) => { let m = format!("gpu: {e:#}"); metrics_gpu.set_status(m.clone()); let _ = init_tx.send(Err(m)); }
+                        });
                     }
-                    Err(e) => {
-                        let msg = format!("gpu error: {e:#}");
-                        metrics_gpu.set_status(msg.clone());
-                        let _ = init_tx.send(Err(msg));
+                    #[cfg(feature = "hip")]
+                    GpuBackendKind::Hip => {
+                        let (blocks, tpb) = (gpu.blocks, gpu.threads_per_block);
+                        tokio::task::spawn_blocking(move || match AmdBackend::new(blocks, tpb) {
+                            Ok(b) => { let _ = init_tx.send(Ok(())); run_compute_worker(id, b, work_rx, gpu_done_tx); }
+                            Err(e) => { let m = format!("amd: {e:#}"); metrics_gpu.set_status(m.clone()); let _ = init_tx.send(Err(m)); }
+                        });
                     }
-                });
-
-                match tokio::time::timeout(Duration::from_secs(15), init_rx).await {
-                    Ok(Ok(Ok(()))) => {
-                        backends.push(BackendHandle::new(chunk_size, work_tx));
-                    }
-                    Ok(Ok(Err(e))) => {
-                        eprintln!("[gpu] {e}");
+                    #[cfg(feature = "vk")]
+                    GpuBackendKind::Vulkan => {
+                        let (blocks, tpb) = (gpu.blocks, gpu.threads_per_block);
+                        tokio::task::spawn_blocking(move || match VkBackend::new(blocks, tpb) {
+                            Ok(b) => { let _ = init_tx.send(Ok(())); run_compute_worker(id, b, work_rx, gpu_done_tx); }
+                            Err(e) => { let m = format!("vk: {e:#}"); metrics_gpu.set_status(m.clone()); let _ = init_tx.send(Err(m)); }
+                        });
                     }
                     _ => {
-                        metrics.set_status("gpu init timed out");
+                        let _ = init_tx.send(Err(format!(
+                            "gpu_profile \"{}\" requires a backend not compiled in \
+                             (rebuild with --features cuda or --features hip)",
+                            self.config.compute.gpu_profile
+                        )));
                     }
                 }
-            }
-
-            #[cfg(feature = "hip")]
-            if self.config.compute.use_amd {
-                let id = backends.len();
-                let (work_tx, work_rx) = mpsc::channel::<Chunk>(2);
-                let amd_done_tx = done_tx.clone();
-                let blocks = self.config.compute.amd_blocks;
-                let tpb = self.config.compute.amd_threads_per_block;
-                let chunk_size = self.config.compute.amd_chunk_size;
-                let metrics_amd = Arc::clone(&metrics);
-
-                let (init_tx, init_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-
-                tokio::task::spawn_blocking(move || match AmdBackend::new(blocks, tpb) {
-                    Ok(backend) => {
-                        let _ = init_tx.send(Ok(()));
-                        run_compute_worker(id, backend, work_rx, amd_done_tx);
-                    }
-                    Err(e) => {
-                        let msg = format!("amd error: {e:#}");
-                        metrics_amd.set_status(msg.clone());
-                        let _ = init_tx.send(Err(msg));
-                    }
-                });
 
                 match tokio::time::timeout(Duration::from_secs(15), init_rx).await {
-                    Ok(Ok(Ok(()))) => {
-                        backends.push(BackendHandle::new(chunk_size, work_tx));
-                    }
-                    Ok(Ok(Err(e))) => {
-                        eprintln!("[amd] {e}");
-                    }
-                    _ => {
-                        metrics.set_status("amd init timed out");
-                    }
+                    Ok(Ok(Ok(()))) => { backends.push(BackendHandle::new(chunk_size, work_tx)); }
+                    Ok(Ok(Err(e))) => { error!("[gpu] {e}"); }
+                    _ => { metrics.set_status("gpu init timed out"); }
                 }
             }
 
@@ -167,10 +172,10 @@ impl ForgeRuntime {
 
             tokio::select! {
                 res = net_handle => {
-                    if let Ok(Err(e)) = res { eprintln!("[net] exited with error: {e}"); }
+                    if let Ok(Err(e)) = res { error!("[net] exited with error: {e}"); }
                 }
                 res = sched_handle => {
-                    if let Ok(Err(e)) = res { eprintln!("[scheduler] exited with error: {e}"); }
+                    if let Ok(Err(e)) = res { error!("[scheduler] exited with error: {e}"); }
                 }
                 _ = cancel.cancelled() => {}
             }
@@ -180,7 +185,9 @@ impl ForgeRuntime {
             Ok(())
         });
 
-        let _ = tui_handle.join();
+        if let Some(handle) = maybe_tui_handle {
+            let _ = handle.join();
+        }
         result
     }
 }

@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use http::header::HeaderValue;
+use log::{debug, error, warn};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async,
@@ -49,7 +50,7 @@ impl NetClient {
                 Ok(()) => break,
                 Err(_) if cancel.is_cancelled() => break,
                 Err(e) => {
-                    eprintln!("[net] connection error: {e}, reconnecting in {backoff:?}");
+                    warn!("[net] connection error: {e}, reconnecting in {backoff:?}");
                     tokio::select! {
                         _ = tokio::time::sleep(backoff) => {}
                         _ = cancel.cancelled() => break,
@@ -144,8 +145,8 @@ impl NetClient {
                 }
                 self.metrics.set_status("waiting for lease");
                 if let Some(code) = w.code {
-                    eprintln!("[net] server issued recovery code: {code}");
-                    eprintln!("[net] add it to identity.code in conf.toml");
+                    warn!("[net] server issued recovery code: {code}");
+                    warn!("[net] add it to identity.code in conf.toml");
                 }
             }
 
@@ -176,25 +177,25 @@ impl NetClient {
             }
 
             ServerMessage::Rejected(r) => {
-                eprintln!("[net] rejected: {}", r.reason);
+                warn!("[net] rejected: {}", r.reason);
             }
 
             ServerMessage::ClientOutdated => {
-                eprintln!("[net] server says client is outdated");
+                warn!("[net] server says client is outdated");
             }
 
             ServerMessage::Banned(b) => {
-                eprintln!("[net] banned: {}", b.reason);
+                error!("[net] banned: {}", b.reason);
                 cancel.cancel();
             }
 
             ServerMessage::ContributionsClosed => {
-                eprintln!("[net] contributions closed");
+                warn!("[net] contributions closed");
                 cancel.cancel();
             }
 
             ServerMessage::Unknown(t) => {
-                //eprintln!("[net] unrecognised message type: {t} -- {text}");
+                debug!("[net] unrecognised message type: {t} -- {text}");
             }
         }
 

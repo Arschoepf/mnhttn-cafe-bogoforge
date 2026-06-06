@@ -3,7 +3,10 @@ pub mod cpu;
 pub mod gpu;
 #[cfg(feature = "hip")]
 pub mod amd;
+#[cfg(feature = "vk")]
+pub mod vk;
 
+use log::debug;
 use tokio::sync::mpsc;
 
 use crate::net::types::{Chunk, RangeResult};
@@ -22,7 +25,15 @@ pub fn run_compute_worker(
     done_tx: mpsc::Sender<(usize, RangeResult)>,
 ) {
     while let Some(chunk) = work_rx.blocking_recv() {
+        debug!("[compute #{id}] starting range base_seed={} lo={} hi={}", chunk.seed, chunk.lo, chunk.hi);
         let result = backend.compute_range(chunk.seed, chunk.lo, chunk.hi);
+        debug!(
+            "[compute #{id}] finished range lo={} hi={} best={} index={}",
+            result.lo,
+            result.hi,
+            result.best_correct,
+            result.best_index,
+        );
         if done_tx.blocking_send((id, result)).is_err() {
             break;
         }

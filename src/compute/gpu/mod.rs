@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use cust::prelude::*;
+use log::debug;
 
 use super::ComputeBackend;
 use crate::net::types::RangeResult;
@@ -72,6 +73,14 @@ impl ComputeBackend for GpuBackend {
 
         let stream = &self.stream;
 
+        debug!(
+            "[cuda] launching kernel base_seed={} lo={} hi={} blocks={} threads={}",
+            base_seed,
+            lo,
+            hi,
+            self.blocks,
+            self.threads_per_block,
+        );
         unsafe {
             launch!(
                 kernel<<<self.blocks, self.threads_per_block, 0, stream>>>(
@@ -87,6 +96,7 @@ impl ComputeBackend for GpuBackend {
         }
 
         self.stream.synchronize().expect("stream sync failed");
+        debug!("[cuda] kernel complete, reading back results");
 
         let mut host_best = [0u64; 1];
         self.dev_best

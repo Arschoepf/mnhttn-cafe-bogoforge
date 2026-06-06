@@ -2,6 +2,7 @@ use std::ffi::CStr;
 use std::ptr;
 
 use anyhow::{bail, Result};
+use log::debug;
 
 use crate::net::types::RangeResult;
 use super::ComputeBackend;
@@ -147,6 +148,7 @@ impl ComputeBackend for AmdBackend {
                 &mut p_dev_indices  as *mut *mut u64 as *mut (),
             ];
 
+            debug!("[hip] launching kernel base_seed={} lo={} hi={} blocks={}", base_seed, lo, hi, self.blocks);
             hip_check(hipModuleLaunchKernel(
                 self.func,
                 self.blocks, 1, 1,
@@ -158,6 +160,7 @@ impl ComputeBackend for AmdBackend {
             )).expect("hipModuleLaunchKernel");
 
             hip_check(hipStreamSynchronize(self.stream)).expect("hipStreamSynchronize");
+            debug!("[hip] kernel complete, copying results to host");
 
             // Read winner.
             let mut host_best = 0u64;

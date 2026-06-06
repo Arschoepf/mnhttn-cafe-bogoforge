@@ -7,6 +7,7 @@ edition = "2021"
 default = []
 cuda = ["dep:cust"]
 hip  = []
+vk   = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [profile.release]
 opt-level = 3
@@ -46,8 +47,18 @@ sysinfo = "0.31"
 parking_lot = "0.12"
 crossbeam-channel = "0.5"
 
-# CUDA bindings (optional; disable with --no-default-features)
+# Logging
+log = "0.4"
+fern = "0.6"
+chrono = "0.4"
+
+# CUDA bindings (optional; enable with --features cuda)
 cust = { version = "0.3", optional = true }
+
+# Vulkan / cross-GPU backend (optional; enable with --features vk)
+wgpu     = { version = "22", optional = true }
+pollster = { version = "0.3", optional = true }
+bytemuck = { version = "1",   optional = true, features = ["derive"] }
 
 [build-dependencies]
 # build.rs uses std::process::Command to invoke nvcc --ptx
