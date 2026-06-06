@@ -85,6 +85,7 @@ mod hip {
                 "-O3",
                 "-ffast-math",
                 "-mno-wavefrontsize64",
+                "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
                 kernel_src.to_str().unwrap(),
                 "-o",
                 hsaco_out.to_str().unwrap(),

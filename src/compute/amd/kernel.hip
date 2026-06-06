@@ -40,37 +40,14 @@ __device__ __forceinline__ uint32_t xint_c(uint32_t s[4], const uint32_t max) {
     return x % max;
 }
 
-__device__ __forceinline__ int hip_shfl_xor_i32(int v, int lane_mask) {
-    return __shfl_xor(v, lane_mask, 32);
-}
-
-__device__ __forceinline__ uint32_t hip_shfl_xor_u32(uint32_t v, int lane_mask) {
-    return (uint32_t)__shfl_xor((unsigned int)v, lane_mask, 32);
-}
-
-__device__ __forceinline__ unsigned long long hip_shfl_xor_u64(unsigned long long v, int lane_mask) {
-    uint32_t lo = (uint32_t)(v & 0xffffffffULL);
-    uint32_t hi = (uint32_t)(v >> 32);
-
-    lo = hip_shfl_xor_u32(lo, lane_mask);
-    hi = hip_shfl_xor_u32(hi, lane_mask);
-
-    return ((unsigned long long)hi << 32) | (unsigned long long)lo;
-}
-
-__device__ __forceinline__ unsigned int hip_shfl_u32(unsigned int v, int src_lane) {
-    return __shfl(v, src_lane, 32);
-}
-
-
 __device__ __forceinline__ void warp_reduce(
     int *score, unsigned long long *index, uint32_t *lane_out
 ) {
     #pragma unroll
     for (int d = 16; d > 0; d >>= 1) {
-        int                ps = hip_shfl_xor_i32(*score, d);
-        unsigned long long pi = hip_shfl_xor_u64(*index, d);
-        uint32_t           pl = hip_shfl_xor_u32(*lane_out, d);
+        int                ps = __shfl_xor_sync(0xffffffffull, *score,    d);
+        unsigned long long pi = __shfl_xor_sync(0xffffffffull, *index,    d);
+        uint32_t           pl = __shfl_xor_sync(0xffffffffull, *lane_out, d);
         if (ps > *score || (ps == *score && pl < *lane_out)) {
             *score    = ps;
             *index    = pi;
@@ -144,7 +121,7 @@ void bogo_range_kernel(
     uint8_t warp_arr[25];
     #pragma unroll
     for (int p = 0; p < 25; p++) {
-        unsigned v = hip_shfl_u32((unsigned)best_arr[p], wl);
+        unsigned v = __shfl_sync(0xffffffffull, (unsigned)best_arr[p], wl);
         if (lane == 0) warp_arr[p] = (uint8_t)v;
     }
 
