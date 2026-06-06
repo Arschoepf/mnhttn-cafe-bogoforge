@@ -9,11 +9,11 @@ url = "wss://bogo.swapjs.dev/ws"
 [compute]
 use_cpu = false
 cpu_chunk_size = 50000000
-cpu_threads = 0
+cpu_threads = 0              # default - 0 for all
 
 use_gpu = true
-gpu_profile = "cuda"
-gpu_chunk_size = 536870912
+gpu_profile = "cuda"         # supports "hip", "cuda", or "vulkan"
+gpu_chunk_size = 536870912   # optional
 gpu_blocks = 4096
 
 [ui]
