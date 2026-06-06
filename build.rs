@@ -54,7 +54,7 @@ mod cuda {
 
 #[cfg(feature = "hip")]
 mod hip {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
     pub fn compile() {
@@ -65,6 +65,7 @@ mod hip {
         println!("cargo:rerun-if-changed=src/compute/amd/kernel.hip");
         println!("cargo:rerun-if-env-changed=HIP_ARCH");
         println!("cargo:rerun-if-env-changed=ROCM_PATH");
+        println!("cargo:rerun-if-env-changed=HIP_LIB_DIR");
 
         if !kernel_src.exists() {
             panic!(
@@ -74,6 +75,7 @@ mod hip {
         }
 
         let arch = std::env::var("HIP_ARCH").unwrap_or_else(|_| "gfx1201".into());
+        // Override with HIP_ARCH=gfx1103, gfx1201, etc.
         println!("cargo:warning=compiling kernel.hip for --offload-arch={arch}");
 
         let output = Command::new("hipcc")
@@ -81,8 +83,8 @@ mod hip {
                 "--genco",
                 &format!("--offload-arch={arch}"),
                 "-O3",
-                "--use_fast_math",
-                "-mwavefrontsize32",
+                "-ffast-math",
+                "-mno-wavefrontsize64",
                 kernel_src.to_str().unwrap(),
                 "-o",
                 hsaco_out.to_str().unwrap(),
@@ -96,7 +98,21 @@ mod hip {
         }
 
         let rocm_path = std::env::var("ROCM_PATH").unwrap_or_else(|_| "/opt/rocm".into());
-        println!("cargo:rustc-link-search={rocm_path}/lib");
+        if let Ok(hip_lib_dir) = std::env::var("HIP_LIB_DIR") {
+            println!("cargo:rustc-link-search=native={hip_lib_dir}");
+        } else {
+            let rocm_lib64 = format!("{rocm_path}/lib64");
+            let rocm_lib = format!("{rocm_path}/lib");
+
+                if Path::new(&rocm_lib64).join("libamdhip64.so").exists() {
+                    println!("cargo:rustc-link-search=native={rocm_lib64}");
+                } else if Path::new(&rocm_lib).join("libamdhip64.so").exists() {
+                    println!("cargo:rustc-link-search=native={rocm_lib}");
+                } else {
+                    println!("cargo:rustc-link-search=native={rocm_lib}");
+                }
+        }
+
         println!("cargo:rustc-link-lib=amdhip64");
 
         println!("cargo:warning=HSACO written to {}", hsaco_out.display());

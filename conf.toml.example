@@ -12,11 +12,17 @@ use_cpu = false
 cpu_chunk_size = 50000000
 cpu_threads = 0
 
-# gpu section
+# Nvidia backend
 use_gpu = true
-gpu_chunk_size = 536870912
+gpu_chunk_size = 536870912 # 512M or 2^29
 cuda_blocks = 1024
 cuda_threads_per_block = 256
+
+# AMD/HIP backend
+use_amd = false
+amd_chunk_size = 535970912 # 512M or 2^29
+amd_blocks = 2048
+amd_threads_per_block = 256
 
 [reporting]
 report_interval = 1000
