@@ -7,7 +7,7 @@ use crate::net::types::RangeResult;
 
 static PTX: &str = include_str!(env!("KERNEL_PTX_PATH"));
 
-pub struct GpuBackend {
+pub struct CudaBackend {
     _ctx: cust::context::Context,
     module: Module,
     stream: Stream,
@@ -20,9 +20,9 @@ pub struct GpuBackend {
     host_indices: Vec<u64>,
 }
 
-unsafe impl Send for GpuBackend {}
+unsafe impl Send for CudaBackend {}
 
-impl GpuBackend {
+impl CudaBackend {
     pub fn new(blocks: u32, threads_per_block: u32) -> Result<Self> {
         anyhow::ensure!(
             threads_per_block == 256,
@@ -62,7 +62,7 @@ impl GpuBackend {
     }
 }
 
-impl ComputeBackend for GpuBackend {
+impl ComputeBackend for CudaBackend {
     fn compute_range(&mut self, base_seed: u64, lo: u64, hi: u64) -> RangeResult {
         self.dev_best.copy_from(&[0u64]).expect("H2D reset failed");
 

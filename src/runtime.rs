@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "cuda")]
-use crate::compute::gpu::GpuBackend;
+use crate::compute::cuda::CudaBackend;
 #[cfg(feature = "hip")]
 use crate::compute::amd::AmdBackend;
 #[cfg(feature = "vk")]
@@ -113,7 +113,7 @@ impl ForgeRuntime {
                     #[cfg(feature = "cuda")]
                     GpuBackendKind::Cuda => {
                         let (blocks, tpb) = (gpu.blocks, gpu.threads_per_block);
-                        tokio::task::spawn_blocking(move || match GpuBackend::new(blocks, tpb) {
+                        tokio::task::spawn_blocking(move || match CudaBackend::new(blocks, tpb) {
                             Ok(b) => { let _ = init_tx.send(Ok(())); run_compute_worker(id, b, work_rx, gpu_done_tx); }
                             Err(e) => { let m = format!("gpu: {e:#}"); metrics_gpu.set_status(m.clone()); let _ = init_tx.send(Err(m)); }
                         });

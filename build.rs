@@ -12,16 +12,16 @@ mod cuda {
     use std::process::Command;
 
     pub fn compile() {
-        let kernel_src = PathBuf::from("src/compute/gpu/kernel.cu");
+        let kernel_src = PathBuf::from("src/compute/cuda/kernel.cu");
         let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
         let ptx_out = out_dir.join("kernel.ptx");
 
-        println!("cargo:rerun-if-changed=src/compute/gpu/kernel.cu");
+        println!("cargo:rerun-if-changed=src/compute/cuda/kernel.cu");
         println!("cargo:rerun-if-env-changed=CUDA_ARCH");
 
         if !kernel_src.exists() {
             panic!(
-                "src/compute/gpu/kernel.cu not found. \
+                "src/compute/cuda/kernel.cu not found. \
                  Create the file before building with --features cuda."
             );
         }

@@ -1,12 +1,12 @@
 pub mod cpu;
 #[cfg(feature = "cuda")]
-pub mod gpu;
+pub mod cuda;
 #[cfg(feature = "hip")]
 pub mod amd;
 #[cfg(feature = "vk")]
 pub mod vk;
 
-use log::debug;
+use log::debug; 
 use tokio::sync::mpsc;
 
 use crate::net::types::{Chunk, RangeResult};
