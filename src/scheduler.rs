@@ -80,6 +80,7 @@ impl Scheduler {
         let interval = Duration::from_millis(self.config.reporting.report_interval);
 
         self.metrics.set_status("computing");
+        self.metrics.set_seed(lease.seed_str.clone());
 
         for b in &mut self.backends {
             b.in_flight = false;
@@ -169,7 +170,7 @@ impl Scheduler {
                     })
                     .await;
 
-                self.metrics.push_report_best(win_best);
+                self.metrics.push_report(win_best, win_arr);
 
                 win_best = -1;
                 win_arr = [0u8; 25];

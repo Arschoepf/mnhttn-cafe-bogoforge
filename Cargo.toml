@@ -41,6 +41,8 @@ orx-parallel = "3"
 # TUI
 ratatui = "0.28"
 crossterm = "0.27"
+
+# Host CPU/RAM stats for the performance view (GPU stats are sampled via nvidia-smi)
 sysinfo = "0.31"
 
 # Sync primitives
