@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  # `.cargo/config.toml` normally forces `-C target-cpu=native`, which bakes
+  # in *the build machine's* CPU features (e.g. AVX-512 on a Zen 5 dev box).
+  # That's great for local builds but would make published binaries crash
+  # with "illegal instruction" on anyone whose CPU doesn't match exactly — and
+  # is outright wrong when cross-compiling (native would mean the runner's
+  # arch, not the target's). RUSTFLAGS here overrides that for every job.
+  #
+  # x86-64-v3 = AVX2 + FMA + BMI2, supported by basically every x86_64 chip
+  # since ~2015. The std::simd code in src/compute/cpu.rs degrades gracefully
+  # to narrower vectors on hardware without AVX-512 — same bit-exact output,
+  # just without the full 16-lane speedup. Anyone who wants that can build
+  # from source, where target-cpu=native does its thing.
+  RUSTFLAGS: "-C target-cpu=x86-64-v3"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Apple Silicon runners build aarch64 natively; x86_64-apple-darwin is
+      # cross-compiled from the same runner. RUSTFLAGS above is x86_64-only —
+      # apple-darwin's default target-cpu is already a sane, portable baseline
+      # (apple-m1 / a generic x86_64 baseline respectively), so no override
+      # needed there; we just make sure `native` from .cargo/config.toml never
+      # gets used for these builds either.
+      - name: build release binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *-apple-darwin && "${{ matrix.target }}" != x86_64-* ]]; then
+            unset RUSTFLAGS
+          fi
+          cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          stage="bogoforge-${{ github.ref_name }}-${{ matrix.name }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/bogoforge" "$stage/"
+          cp conf.toml.example README.md LICENSE "$stage/"
+          tar -czf "$stage.tar.gz" "$stage"
+          echo "ASSET=$stage.tar.gz" >> "$GITHUB_ENV"
+
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "bogoforge-${{ github.ref_name }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/bogoforge.exe" "$stage/"
+          Copy-Item conf.toml.example,README.md,LICENSE "$stage/"
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          Add-Content $env:GITHUB_ENV "ASSET=$stage.zip"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  # Best-effort CUDA build: nvcc can compile kernel.cu -> PTX without a
+  # physical GPU (cust::quick_init still needs one *at runtime* on the user's
+  # machine, but not to build), so this can run on a stock Linux runner with
+  # the toolkit installed. Kept separate from the main matrix and allowed to
+  # fail — toolkit-install actions / CUDA versions shift around often enough
+  # that this is the part most likely to need occasional care.
+  build-cuda:
+    name: linux-x86_64-cuda
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2
+        with:
+          method: network
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cuda
+
+      - name: build release binary (cuda feature)
+        run: cargo build --release --locked --features cuda
+
+      - name: package
+        shell: bash
+        run: |
+          stage="bogoforge-${{ github.ref_name }}-linux-x86_64-cuda"
+          mkdir -p "$stage"
+          cp target/release/bogoforge "$stage/"
+          cp conf.toml.example README.md LICENSE "$stage/"
+          tar -czf "$stage.tar.gz" "$stage"
+          echo "ASSET=$stage.tar.gz" >> "$GITHUB_ENV"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-cuda
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: [build, build-cuda]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

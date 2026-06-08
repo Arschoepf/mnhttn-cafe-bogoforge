@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use anyhow::Context;
 use chrono::Local;
 use fern::Dispatch;
 use log::LevelFilter;
@@ -16,8 +17,22 @@ pub mod runtime;
 pub mod scheduler;
 pub mod tui;
 
+/// Baked into the binary at build time so a bare release artifact — copied
+/// somewhere with no `conf.toml.example` alongside it — can still bootstrap
+/// itself on first run instead of just erroring out.
+const EXAMPLE_CONFIG: &str = include_str!("../conf.toml.example");
+
 fn main() -> anyhow::Result<()> {
-    let config = config::Config::load(Path::new("conf.toml"))?;
+    let config_path = Path::new("conf.toml");
+    if !config_path.exists() {
+        std::fs::write(config_path, EXAMPLE_CONFIG)
+            .context("failed to write starter conf.toml")?;
+        println!("no conf.toml found — wrote a starter config to ./conf.toml");
+        println!("fill in [identity] (uuid, nickname, code) and re-run bogoforge");
+        return Ok(());
+    }
+
+    let config = config::Config::load(config_path)?;
     init_logging(&config)?;
 
     log::info!("starting bogoforge (disable_tui={}, kernel_activity={})", config.ui.disable_tui, config.logging.kernel_activity);
