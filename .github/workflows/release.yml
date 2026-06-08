@@ -100,21 +100,33 @@ jobs:
           path: ${{ env.ASSET }}
           if-no-files-found: error
 
-  # Best-effort CUDA build: nvcc can compile kernel.cu -> PTX without a
+  # Best-effort CUDA builds: nvcc can compile kernel.cu -> PTX without a
   # physical GPU (cust::quick_init still needs one *at runtime* on the user's
-  # machine, but not to build), so this can run on a stock Linux runner with
-  # the toolkit installed. Kept separate from the main matrix and allowed to
-  # fail — toolkit-install actions / CUDA versions shift around often enough
-  # that this is the part most likely to need occasional care.
+  # machine, but not to build), so this can run on stock Linux/Windows runners
+  # with the toolkit installed. Kept separate from the main matrix and allowed
+  # to fail — toolkit-install actions, CUDA versions, and (on Windows) nvcc's
+  # reliance on the MSVC host toolchain shift around often enough that this is
+  # the part most likely to need occasional care.
   build-cuda:
-    name: linux-x86_64-cuda
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64-cuda
+            os: ubuntu-latest
+          - name: windows-x86_64-cuda
+            os: windows-latest
     steps:
       - uses: actions/checkout@v4
 
+      # windows-latest ships MSVC build tools, which nvcc shells out to for
+      # host-side compilation — `Jimver/cuda-toolkit` just needs to land nvcc
+      # itself on PATH alongside it.
       - name: install CUDA toolkit
-        uses: Jimver/cuda-toolkit@v0.2
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           method: network
 
@@ -123,25 +135,37 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: cuda
+          key: cuda-${{ matrix.os }}
 
       - name: build release binary (cuda feature)
         run: cargo build --release --locked --features cuda
 
-      - name: package
+      - name: package (unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          stage="bogoforge-${{ github.ref_name }}-linux-x86_64-cuda"
+          stage="bogoforge-${{ github.ref_name }}-${{ matrix.name }}"
           mkdir -p "$stage"
           cp target/release/bogoforge "$stage/"
           cp conf.toml.example README.md LICENSE "$stage/"
           tar -czf "$stage.tar.gz" "$stage"
           echo "ASSET=$stage.tar.gz" >> "$GITHUB_ENV"
 
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "bogoforge-${{ github.ref_name }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/release/bogoforge.exe" "$stage/"
+          Copy-Item conf.toml.example,README.md,LICENSE "$stage/"
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          Add-Content $env:GITHUB_ENV "ASSET=$stage.zip"
+
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-x86_64-cuda
+          name: ${{ matrix.name }}
           path: ${{ env.ASSET }}
           if-no-files-found: error
 
