@@ -13,9 +13,12 @@ source "$HOME/.cargo/env"
 ```
 
 make config file
-```cp conf.toml.example conf.toml```
+```
+cd bogoforge
+cp conf.toml.example conf.toml
+```
 
-Setting are in `conf.tml`:
+Setting are in `conf.toml`:
 ```
 [identity]
 uuid = ""
