@@ -1,3 +1,7 @@
+// Vectorized PRNG/rejection-sampling in the CPU compute kernel (src/compute/cpu.rs)
+// uses `std::simd` (portable_simd) to drive AVX-512 on the target-cpu=native build.
+#![feature(portable_simd)]
+
 use std::path::Path;
 
 use chrono::Local;
